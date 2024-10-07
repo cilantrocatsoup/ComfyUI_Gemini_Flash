@@ -5,22 +5,26 @@ from io import BytesIO
 from PIL import Image
 import torch
 from contextlib import contextmanager
+import time  # 导入时间模块
 
 p = os.path.dirname(os.path.realpath(__file__))
+
 
 def get_config():
     try:
         config_path = os.path.join(p, 'config.json')
-        with open(config_path, 'r') as f:  
+        with open(config_path, 'r') as f:
             config = json.load(f)
         return config
     except:
         return {}
 
+
 def save_config(config):
     config_path = os.path.join(p, 'config.json')
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=4)
+
 
 @contextmanager
 def temporary_env_var(key: str, new_value):
@@ -37,12 +41,14 @@ def temporary_env_var(key: str, new_value):
         elif key in os.environ:
             del os.environ[key]
 
+
 class Gemini_Flash:
 
     def __init__(self, api_key=None, proxy=None):
         config = get_config()
         self.api_key = api_key or config.get("GEMINI_API_KEY")
         self.proxy = proxy or config.get("PROXY")
+        self.request_times = []  # 用于记录请求时间
         if self.api_key is not None:
             self.configure_genai()
 
@@ -53,13 +59,14 @@ class Gemini_Flash:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt": ("STRING", {"default": "Analyze the image and make a txt2img detailed prompt. no prefix!", "multiline": True}),
+                "prompt": ("STRING", {"default": "Analyze the image and make a txt2img detailed prompt. no prefix!",
+                                      "multiline": True}),
                 "vision": ("BOOLEAN", {"default": True}),
                 "api_key": ("STRING", {"default": ""}),
                 "proxy": ("STRING", {"default": ""})
             },
             "optional": {
-                "image": ("IMAGE",),  
+                "image": ("IMAGE",),
             }
         }
 
@@ -83,13 +90,24 @@ class Gemini_Flash:
         if proxy != self.proxy:
             self.proxy = proxy
             config_updated = True
-        
+
         if config_updated:
             save_config({"GEMINI_API_KEY": self.api_key, "PROXY": self.proxy})
             self.configure_genai()
 
         if not self.api_key:
             raise ValueError("API key is required")
+
+        # 控制请求频率
+        current_time = time.time()
+        self.request_times.append(current_time)
+
+        # 移除超过 60 秒的请求时间
+        self.request_times = [t for t in self.request_times if t > current_time - 60]
+
+        if len(self.request_times) > 15:
+            # 如果请求次数超过 15，等待直到可以发送新的请求
+            time.sleep(1)  # 每次请求后等待 1 秒
 
         model_name = 'gemini-1.5-flash'
         model = genai.GenerativeModel(model_name)
@@ -110,8 +128,9 @@ class Gemini_Flash:
                         textoutput = response.text
             except Exception as e:
                 textoutput = f"Error: {str(e)}"
-        
+
         return (textoutput,)
+
 
 NODE_CLASS_MAPPINGS = {
     "Gemini_Flash": Gemini_Flash,
